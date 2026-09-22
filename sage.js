@@ -199,6 +199,14 @@ const LAYOUT_BASE = JSON.parse(JSON.stringify(layouts));
 // prevent.
 const LAYOUT_SCALE_CEILING = {
     dragon: 2.5,
+    // A sparse custom grid (e.g. 2-3 cards spread across the whole table)
+    // has so little card-to-card spacing constraint that the default
+    // ceiling let it balloon to ~500px-tall cards — far bigger than any
+    // built-in layout ever produces. That oversized card then forces the
+    // draw pile much further down the page than any built-in layout does,
+    // which is what showed up as "custom always needs more scrolling."
+    // Capped in line with what the built-in layouts actually reach.
+    custom: 1.3,
 };
 const DEFAULT_LAYOUT_SCALE_CEILING = 1.7;
 
@@ -811,28 +819,30 @@ function saveCustomLayout(selectedCells) {
     const usedCols = maxC - minC + 1;
     const usedRows = maxR - minR + 1;
 
-    const table  = document.getElementById('table');
-    const rect   = table.getBoundingClientRect();
-    const tableW = rect.width  || window.innerWidth;
-    const tableH = rect.height || (window.innerHeight - 70);
-
-    // Cards are always the built-in "2x4" layout's own fixed size —
-    // never shrunk for denser grids — so every custom layout looks and
-    // feels the same regardless of row/column count. If a tall layout
-    // reaches past the card deck pile below the table, adjustDeckForLayout()
-    // (called via setLayout() below) pushes the pile down to clear it
-    // instead.
+    // Cards start at the built-in "2x4" layout's own design size —
+    // fitLayoutToTable() (run via setLayout() below, same as every other
+    // layout) then scales that up or down from the columns/rows' real
+    // on-screen spacing, same as it does for the built-in layouts.
     const cardW = 200;
     const cardH = 300;
 
     // MARGIN_PCT matches the ~25% edge margin the built-in "2x4" layout
     // uses on both axes (its positions run 25%-76% horizontally and
-    // 25%-72% vertically). Step is derived from the fixed card size with
-    // the same fill factor, so column/row spacing follows the same rule
-    // the "2x4" layout uses no matter how many rows or columns are used.
+    // 25%-72% vertically). Columns/rows are spread evenly across that same
+    // 25%-75% band, however many are used, rather than stepping outward by
+    // a fixed per-card-size amount — the old step formula was derived
+    // assuming a ~1400px-wide table, so on a narrower one (iPad, phone) it
+    // could walk later columns/rows straight past the table's own edge.
+    // fitLayoutToTable()'s edge-safety check then had to shrink the
+    // *entire* layout down to almost nothing to pull that one point back
+    // inside the table. Evenly spacing within a fixed band can never
+    // overflow, regardless of table size or how many cells were picked —
+    // the actual card size still comes from fitLayoutToTable() reading
+    // these points' real pixel spacing once they're set.
     const MARGIN_PCT = 25;
-    const stepXPct = usedCols > 1 ? ((cardW / 0.85) / tableW) * 100 : 0;
-    const stepYPct = usedRows > 1 ? ((cardH / 0.85) / tableH) * 100 : 0;
+    const spanPct  = 100 - 2 * MARGIN_PCT; // 50, matches the "2x4" layout's own span
+    const stepXPct = usedCols > 1 ? spanPct / (usedCols - 1) : 0;
+    const stepYPct = usedRows > 1 ? spanPct / (usedRows - 1) : 0;
 
     layouts.custom     = { cardSize: { width: `${cardW}px`, height: `${cardH}px` } };
     drawOrders.custom  = [];
