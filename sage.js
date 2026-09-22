@@ -210,9 +210,9 @@ const DEFAULT_LAYOUT_SCALE_CEILING = 1.7;
 // and user-built custom layouts, which share the same tight-packing
 // tendency) get a bit more fill.
 const LAYOUT_GUTTER = {
-    dragon: 0.92,
-    celtic: 0.92,
-    vformation: 0.93,
+    dragon: 0.97,
+    celtic: 0.97,
+    vformation: 0.97,
     custom: 0.9,
 };
 const DEFAULT_LAYOUT_GUTTER = 0.85;
@@ -350,6 +350,14 @@ let currentLayout = 'tarot';
 fitLayoutToTable('tarot');           // size the default layout for whatever screen loads first
 let positions       = layouts.tarot;      // default layout
 let drawOrder       = drawOrders.tarot;   // default draw order
+
+// Apply the responsive sizing above right away, not just the next time a
+// layout is chosen or a deck is selected — otherwise the table/deck/page
+// stay at their much taller, un-fitted starting size until the first
+// setLayout()/selectDeck() call happens to run, which reads as the
+// background only "resizing correctly" after some unrelated click.
+createDeck();
+adjustDeckForLayout();
 
 // =============================================================================
 // LAYOUT SWITCHER
@@ -1673,6 +1681,24 @@ function createDeck() {
     const deckArea = document.getElementById("deck");
     if (!deckArea) return;
 
+    // The pile's cards are sized in fixed px by their CSS (.deckCard /
+    // .deckCard.circular), designed around a ~1400px desktop viewport —
+    // scale them (and the fan's spacing) with the viewport so the pile
+    // isn't left tiny on a phone or stuck small on a huge monitor. This
+    // has to happen even with no deck loaded yet (deckConfig starts empty
+    // until the visitor creates/picks a custom deck) — the container's
+    // height is about fitting the screen, not about which cards are in it.
+    const uiScale = getViewportUiScale();
+    const cardH   = Math.round(200 * uiScale);
+
+    // The container's CSS height (460px) was sized for the pile's old
+    // fixed 200px-tall cards plus room for the hover lift — on a smaller
+    // screen the cards now render shorter, so that fixed height just adds
+    // dead space (and more scrolling) below them. Scale it with the actual
+    // card height instead, with a floor so there's always room for the
+    // hover-lift animation and shadow.
+    deckArea.style.height = `${Math.max(140, Math.round(cardH * 1.3))}px`;
+
     if (!currentDeckName || !deckConfig[currentDeckName]) {
         deckArea.innerHTML = "";
         return;
@@ -1682,22 +1708,7 @@ function createDeck() {
     const existingChildren = Array.from(deckArea.children);
     const fragment = document.createDocumentFragment();
     const totalCards = currentDeck.length;
-
-    // The pile's cards are sized in fixed px by their CSS (.deckCard /
-    // .deckCard.circular), designed around a ~1400px desktop viewport —
-    // scale them (and the fan's spacing) with the viewport so the pile
-    // isn't left tiny on a phone or stuck small on a huge monitor.
-    const uiScale   = getViewportUiScale();
-    const cardW     = Math.round(120 * uiScale);
-    const cardH     = Math.round(200 * uiScale);
-
-    // The container's CSS height (460px) was sized for the pile's old
-    // fixed 200px-tall cards plus room for the hover lift — on a smaller
-    // screen the cards now render shorter, so that fixed height just adds
-    // dead space (and more scrolling) below them. Scale it with the actual
-    // card height instead, with a floor so there's always room for the
-    // hover-lift animation and shadow.
-    deckArea.style.height = `${Math.max(140, Math.round(cardH * 1.3))}px`;
+    const cardW = Math.round(120 * uiScale);
 
     const maxWidth  = Math.max(220, deckArea.offsetWidth - 220);
     const spacing   = Math.min(22 * uiScale, maxWidth / Math.max(1, totalCards));
