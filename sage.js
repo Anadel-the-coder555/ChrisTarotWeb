@@ -76,7 +76,13 @@ const layouts = {
         // 1, 2, 10, 5 form the center spine (x45%), shifted up slightly
         // from their old 10/39/67 spots to leave room for 5 as a 4th card
         // underneath instead of off in its own column to the left.
-        1:  { x: '45%', y: '7%' },
+        // Point 1's y was 7% — close enough to the table's top edge that
+        // fitLayoutToTable()'s edge check (which keeps every card fully
+        // inside the table) capped the whole layout's scale hard to stay
+        // clear of it. 13% gives it the same kind of headroom the other
+        // points already have, so the layout's real bottleneck goes back
+        // to point spacing instead of edge clearance.
+        1:  { x: '45%', y: '13%' },
         2:  { x: '45%', y: '34%' },
         3:  { x: '55%', y: '15%' },
         4:  { x: '35%', y: '15%' },
@@ -132,16 +138,23 @@ const layouts = {
         // 1 and 2 (the crossing pair) are untouched. 3/4 pulled further
         // still from center. 7-10 (the right-hand column) shifted up and
         // given a little more breathing room between cards.
+        // 3 and 10 sat at y=6%/5% — right at the table's top edge.
+        // fitLayoutToTable() has to keep every card fully on the table, so
+        // that near-zero headroom was forcing the whole layout down to a
+        // fraction of its real size on every screen, not just small ones.
+        // Nudged both down a few % (10 gets slightly more since it started
+        // closer) so the layout's actual point-spacing becomes the limit
+        // again instead of the top edge.
         1:  { x: '35%', y: '40%' },
         2:  { x: '35%', y: '40%', rotate: 90 },
-        3:  { x: '35%', y: '6%' },
+        3:  { x: '35%', y: '11%' },
         4:  { x: '35%', y: '74%' },
         5:  { x: '15%', y: '40%' },
         6:  { x: '55%', y: '40%' },
         7:  { x: '75%', y: '86%' },
         8:  { x: '75%', y: '59%' },
         9:  { x: '75%', y: '32%' },
-        10: { x: '75%', y: '5%' },
+        10: { x: '75%', y: '10%' },
 },
 
 };
@@ -174,21 +187,35 @@ const drawOrders = {
 
 const LAYOUT_BASE = JSON.parse(JSON.stringify(layouts));
 
-// Per-layout min/max scale (relative to its authored size above). Dragon's
-// authored cards are tiny (80x130) by design — meant to be blown up to fill
-// whatever space the collapsed side panels free up — so it's allowed to
-// scale up much further than the rest.
 // Only a ceiling — how far a layout is allowed to scale UP on a big
 // screen, so it doesn't stay stuck at its small authored design size once
-// there's plenty of room. There's deliberately no floor here: the
-// anti-overlap math below already computes the largest scale that keeps
-// every point's card apart, and forcing a minimum on top of that would
-// mean overriding the actual safe size on a narrow phone — i.e. causing
-// exactly the overlap this whole thing exists to prevent.
+// there's plenty of room. Dragon's authored cards are tiny (80x130) by
+// design — meant to be blown up to fill whatever space the collapsed side
+// panels free up — so it gets a much higher ceiling than the rest. There's
+// deliberately no floor: the anti-overlap math below already computes the
+// largest scale that keeps every point's card apart, and forcing a minimum
+// on top of that would mean overriding the actual safe size on a narrow
+// phone — i.e. causing exactly the overlap this whole thing exists to
+// prevent.
 const LAYOUT_SCALE_CEILING = {
     dragon: 2.5,
 };
 const DEFAULT_LAYOUT_SCALE_CEILING = 1.7;
+
+// How tightly cards are allowed to pack before the anti-overlap math backs
+// off — 1 would let them touch exactly at the pair-distance limit; lower
+// leaves more breathing room. Layouts whose spacing was already generous
+// (2x4, circle, slant) keep the original, more cautious value; the ones
+// that came out smaller in practice (dragon, Celtic Cross, V-formation,
+// and user-built custom layouts, which share the same tight-packing
+// tendency) get a bit more fill.
+const LAYOUT_GUTTER = {
+    dragon: 0.92,
+    celtic: 0.92,
+    vformation: 0.93,
+    custom: 0.9,
+};
+const DEFAULT_LAYOUT_GUTTER = 0.85;
 
 function fitLayoutToTable(name) {
     const base = LAYOUT_BASE[name];
@@ -255,7 +282,7 @@ function fitLayoutToTable(name) {
         );
     });
 
-    const GUTTER = 0.85; // leave breathing room between adjacent cards
+    const GUTTER = LAYOUT_GUTTER[name] || DEFAULT_LAYOUT_GUTTER;
     const ceiling = LAYOUT_SCALE_CEILING[name] || DEFAULT_LAYOUT_SCALE_CEILING;
     // HARD_FLOOR is a sanity net only (guards against a 0px/negative card
     // if a table ever measures 0), not a legibility target — see the note
@@ -381,9 +408,19 @@ function adjustDeckForLayout() {
         if (bottomPx > maxBottomPx) maxBottomPx = bottomPx;
     });
 
-    const DECK_DEFAULT_CLEARANCE_PX = 750; // matches the pile's original fixed position
+    const DECK_DEFAULT_CLEARANCE_PX = 750; // the pile's original fixed position, on a tall desktop window
     const DECK_BUFFER_PX = 20;
-    const clearance = Math.max(DECK_DEFAULT_CLEARANCE_PX, maxBottomPx + DECK_BUFFER_PX);
+    const minClearance = maxBottomPx + DECK_BUFFER_PX; // must clear the lowest card, non-negotiable
+
+    // The flat 750px default was tuned for a tall desktop browser window —
+    // on a shorter viewport (tablet, phone, or just a smaller monitor) it
+    // reserves far more empty gap than the screen can show at once,
+    // forcing a long scroll just to reach the draw pile. Cap it at
+    // whatever room the viewport actually has below the table, so the
+    // extra gap only shows up on screens tall enough to fit it — the pile
+    // still always clears the lowest card either way.
+    const viewportRoom = Math.max(minClearance, window.innerHeight - table.offsetTop - DECK_BUFFER_PX);
+    const clearance = Math.min(Math.max(minClearance, DECK_DEFAULT_CLEARANCE_PX), viewportRoom);
 
     deck.style.marginTop = "0px";
     deck.style.top = `${table.offsetTop + clearance}px`;
@@ -1653,6 +1690,15 @@ function createDeck() {
     const uiScale   = getViewportUiScale();
     const cardW     = Math.round(120 * uiScale);
     const cardH     = Math.round(200 * uiScale);
+
+    // The container's CSS height (460px) was sized for the pile's old
+    // fixed 200px-tall cards plus room for the hover lift — on a smaller
+    // screen the cards now render shorter, so that fixed height just adds
+    // dead space (and more scrolling) below them. Scale it with the actual
+    // card height instead, with a floor so there's always room for the
+    // hover-lift animation and shadow.
+    deckArea.style.height = `${Math.max(140, Math.round(cardH * 1.3))}px`;
+
     const maxWidth  = Math.max(220, deckArea.offsetWidth - 220);
     const spacing   = Math.min(22 * uiScale, maxWidth / Math.max(1, totalCards));
     const deckWidth = totalCards * spacing;
