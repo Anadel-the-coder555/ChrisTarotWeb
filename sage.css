@@ -12,6 +12,17 @@ body {
     min-height: 100vh;
 }
 
+/* background-attachment: fixed is unreliable on small/mobile viewports
+   (notably iOS Safari, where it can fail to repaint correctly) — fall
+   back to a normal scrolling background there. size/position/repeat stay
+   the same, so it still fills and crops the same way, just without the
+   parallax-style fixed attachment. */
+@media (max-width: 768px) {
+    body {
+        background-attachment: scroll;
+    }
+}
+
 @font-face {
   font-family: 'Crimson Roman';
   src: url('fonts/CrimsonRoman.otf') format('opentype');

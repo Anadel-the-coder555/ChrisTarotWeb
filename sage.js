@@ -158,6 +158,160 @@ const drawOrders = {
 };
 
 // =============================================================================
+// RESPONSIVE LAYOUT FITTING
+// Every built-in layout is authored above at one fixed design size/spacing.
+// On a narrow screen the table shrinks but the % positions don't, so fixed
+// px cards can end up wider than the gap between them (overlap); on a very
+// wide/tall screen the same fixed px cards stay small and leave the extra
+// room unused. fitLayoutToTable() re-derives each layout's actual on-screen
+// card size from the table's real, current dimensions, picking the largest
+// scale (within sane bounds) at which no two of its points' card boxes
+// overlap — so it's correct by construction on any screen, not just the
+// ones it's been tested on. LAYOUT_BASE keeps the original authored
+// numbers so repeated resizes always scale from the same reference instead
+// of compounding drift off a previously-scaled copy.
+// =============================================================================
+
+const LAYOUT_BASE = JSON.parse(JSON.stringify(layouts));
+
+// Per-layout min/max scale (relative to its authored size above). Dragon's
+// authored cards are tiny (80x130) by design — meant to be blown up to fill
+// whatever space the collapsed side panels free up — so it's allowed to
+// scale up much further than the rest.
+// Only a ceiling — how far a layout is allowed to scale UP on a big
+// screen, so it doesn't stay stuck at its small authored design size once
+// there's plenty of room. There's deliberately no floor here: the
+// anti-overlap math below already computes the largest scale that keeps
+// every point's card apart, and forcing a minimum on top of that would
+// mean overriding the actual safe size on a narrow phone — i.e. causing
+// exactly the overlap this whole thing exists to prevent.
+const LAYOUT_SCALE_CEILING = {
+    dragon: 2.5,
+};
+const DEFAULT_LAYOUT_SCALE_CEILING = 1.7;
+
+function fitLayoutToTable(name) {
+    const base = LAYOUT_BASE[name];
+    if (!base || !base.cardSize) return;
+
+    const table = document.getElementById("table");
+    if (!table) return;
+    const tableRect = table.getBoundingClientRect();
+    const tableW = tableRect.width  || window.innerWidth;
+    const tableH = tableRect.height || (window.innerHeight - 70);
+
+    const BUFFER_PX  = 20;
+    const insetLeft  = BUFFER_PX;
+    const insetTop    = BUFFER_PX;
+    const availW = Math.max(1, tableW - BUFFER_PX * 2);
+    const availH = Math.max(1, tableH - BUFFER_PX * 2);
+
+    const pointKeys = Object.keys(base).filter(key => key !== "cardSize");
+    const pxPoints = {};
+    pointKeys.forEach(key => {
+        const p = base[key];
+        pxPoints[key] = {
+            xPx: insetLeft + (parseFloat(p.x) / 100) * availW,
+            yPx: insetTop  + (parseFloat(p.y) / 100) * availH,
+            rotate: p.rotate || 0,
+        };
+    });
+
+    const baseW = parseFloat(base.cardSize.width)  || 1;
+    const baseH = parseFloat(base.cardSize.height) || 1;
+
+    // Largest scale at which no two points' card boxes overlap: for each
+    // pair, a scale is safe as long as EITHER axis keeps them apart, so the
+    // per-pair limit is max(dx/baseW, dy/baseH); the layout's limit is the
+    // tightest pair. Pairs authored at (near) the same spot on purpose —
+    // e.g. the Celtic Cross's crossed 1/2 pair — are meant to overlap, so
+    // they're skipped rather than collapsing the whole layout's scale to
+    // its floor.
+    let pairScale = Infinity;
+    for (let i = 0; i < pointKeys.length; i++) {
+        for (let j = i + 1; j < pointKeys.length; j++) {
+            const a = pxPoints[pointKeys[i]], b = pxPoints[pointKeys[j]];
+            const dx = Math.abs(a.xPx - b.xPx), dy = Math.abs(a.yPx - b.yPx);
+            if (dx < 1 && dy < 1) continue;
+            pairScale = Math.min(pairScale, Math.max(dx / baseW, dy / baseH));
+        }
+    }
+    if (!isFinite(pairScale)) pairScale = 1;
+
+    // Also cap so the largest card can't spill past the table's own edges
+    // (matters most on very wide/short tables where the pair-distance cap
+    // alone would let cards grow past the visible area).
+    let edgeScale = Infinity;
+    pointKeys.forEach(key => {
+        const p = pxPoints[key];
+        const leftRoom  = p.xPx - insetLeft;
+        const rightRoom = (insetLeft + availW) - p.xPx;
+        const topRoom   = p.yPx - insetTop;
+        const botRoom   = (insetTop + availH) - p.yPx;
+        edgeScale = Math.min(
+            edgeScale,
+            (2 * Math.max(1, Math.min(leftRoom, rightRoom))) / baseW,
+            (2 * Math.max(1, Math.min(topRoom, botRoom))) / baseH
+        );
+    });
+
+    const GUTTER = 0.85; // leave breathing room between adjacent cards
+    const ceiling = LAYOUT_SCALE_CEILING[name] || DEFAULT_LAYOUT_SCALE_CEILING;
+    // HARD_FLOOR is a sanity net only (guards against a 0px/negative card
+    // if a table ever measures 0), not a legibility target — see the note
+    // on LAYOUT_SCALE_CEILING above for why there's no real minimum.
+    const HARD_FLOOR = 0.15;
+    const scale = Math.max(HARD_FLOOR, Math.min(ceiling, Math.min(pairScale, edgeScale) * GUTTER));
+
+    layouts[name] = {
+        cardSize: {
+            width:  `${Math.round(baseW * scale)}px`,
+            height: `${Math.round(baseH * scale)}px`,
+        },
+    };
+    pointKeys.forEach(key => {
+        layouts[name][key] = {
+            x: `${(pxPoints[key].xPx / tableW) * 100}%`,
+            y: `${(pxPoints[key].yPx / tableH) * 100}%`,
+            rotate: pxPoints[key].rotate,
+        };
+    });
+}
+
+// Re-applies the (possibly just-recomputed) current layout's position/size
+// to cards already drawn on the table, so an in-progress reading doesn't
+// stay stuck at stale coordinates after a resize. Each drawn card records
+// which position number it occupies (see drawCard()) so it can look its
+// entry back up here.
+function reflowTableCards() {
+    const table = document.getElementById("table");
+    if (!table) return;
+    const size = layouts[currentLayout] && layouts[currentLayout].cardSize;
+    if (!size) return;
+
+    table.querySelectorAll(".card").forEach(cardDiv => {
+        const pos = positions[cardDiv.dataset.posNum];
+        if (!pos) return;
+        const isCircular = cardDiv.classList.contains("circular");
+        cardDiv.style.left   = pos.x;
+        cardDiv.style.top    = pos.y;
+        cardDiv.style.width  = size.width;
+        cardDiv.style.height = isCircular ? size.width : size.height;
+        cardDiv.style.transform = `translate(-50%, -50%) rotate(${pos.rotate || 0}deg)`;
+    });
+}
+
+// Baseline scale for elements sized in fixed px that fall outside the
+// per-layout fitting above (currently just the draw-pile cards) — anchored
+// to a ~1400px-wide desktop viewport, the size those px values were
+// designed at, and clamped so the pile never gets illegibly small on a
+// phone or comically large on an ultra-wide monitor.
+function getViewportUiScale() {
+    const REF_W = 1400;
+    return Math.min(1.3, Math.max(0.55, window.innerWidth / REF_W));
+}
+
+// =============================================================================
 // RUNTIME STATE
 // =============================================================================
 
@@ -166,6 +320,7 @@ let currentDeck     = [];
 let activeDeckType  = "tarot";
 let layoutIndex     = 0;
 let currentLayout = 'tarot';
+fitLayoutToTable('tarot');           // size the default layout for whatever screen loads first
 let positions       = layouts.tarot;      // default layout
 let drawOrder       = drawOrders.tarot;   // default draw order
 
@@ -181,8 +336,8 @@ function setLayout(name) {
         // via closeLayoutPicker()).
         document.getElementById("deckSelector")?.classList.add("collapsed");
         document.getElementById("toggleDeckBar")?.classList.add("collapsed");
-        fitDragonLayout();
     }
+    fitLayoutToTable(name);
     currentLayout = name;
     positions   = layouts[name];
     drawOrder   = drawOrders[name];
@@ -190,70 +345,6 @@ function setLayout(name) {
     document.getElementById("table").innerHTML = "";
     createDeck();
     adjustDeckForLayout();
-}
-
-// The dragon rune layout's cards are small (80x130) by default. setLayout()
-// collapses the deck-selector panel and the settings panel auto-collapses
-// right after via closeLayoutPicker(), so both sit off-screen by the time
-// this is visible — size cards to fill the table's full width/height
-// (minus a small edge buffer), as large as possible without any two of
-// the 10 points' cards overlapping.
-const DRAGON_BASE = JSON.parse(JSON.stringify(layouts.dragon));
-
-function fitDragonLayout() {
-    const table = document.getElementById("table");
-    if (!table) return;
-    const tableRect = table.getBoundingClientRect();
-    const tableW = tableRect.width  || window.innerWidth;
-    const tableH = tableRect.height || (window.innerHeight - 70);
-
-    const BUFFER_PX  = 20;
-    const insetLeft  = BUFFER_PX;
-    const insetRight = tableW - BUFFER_PX;
-    const insetTop    = BUFFER_PX;
-    const insetBottom = tableH - BUFFER_PX;
-    const availW = Math.max(1, insetRight - insetLeft);
-    const availH = Math.max(1, insetBottom - insetTop);
-
-    const pointKeys = Object.keys(DRAGON_BASE).filter(key => key !== "cardSize");
-    const pxPoints = {};
-    pointKeys.forEach(key => {
-        const base = DRAGON_BASE[key];
-        pxPoints[key] = {
-            xPx: insetLeft + (parseFloat(base.x) / 100) * availW,
-            yPx: insetTop  + (parseFloat(base.y) / 100) * availH,
-            rotate: base.rotate || 0,
-        };
-    });
-
-    // Largest scale (relative to the base 80x130 size) at which no two
-    // points' card boxes overlap: for each pair, a scale is safe as long
-    // as EITHER axis keeps them apart, so the per-pair limit is
-    // max(dx/baseW, dy/baseH); the layout's limit is the tightest pair.
-    const baseW = DRAGON_BASE.cardSize && parseFloat(DRAGON_BASE.cardSize.width)  || 80;
-    const baseH = DRAGON_BASE.cardSize && parseFloat(DRAGON_BASE.cardSize.height) || 130;
-    let pairScale = Infinity;
-    for (let i = 0; i < pointKeys.length; i++) {
-        for (let j = i + 1; j < pointKeys.length; j++) {
-            const a = pxPoints[pointKeys[i]], b = pxPoints[pointKeys[j]];
-            const dx = Math.abs(a.xPx - b.xPx), dy = Math.abs(a.yPx - b.yPx);
-            pairScale = Math.min(pairScale, Math.max(dx / baseW, dy / baseH));
-        }
-    }
-    const GUTTER = 0.85; // leave breathing room between adjacent cards
-    const scale = Math.min(2.5, Math.max(0.5, pairScale * GUTTER));
-
-    layouts.dragon.cardSize = {
-        width:  `${Math.round(baseW * scale)}px`,
-        height: `${Math.round(baseH * scale)}px`,
-    };
-    pointKeys.forEach(key => {
-        layouts.dragon[key] = {
-            x: `${(pxPoints[key].xPx / tableW) * 100}%`,
-            y: `${(pxPoints[key].yPx / tableH) * 100}%`,
-            rotate: pxPoints[key].rotate,
-        };
-    });
 }
 
 // The draw pile (#deck) sits at a fixed spot by default (see its CSS
@@ -310,13 +401,29 @@ function adjustDeckForLayout() {
 // a single quick recompute can land mid-animation and measure a table
 // height that isn't final yet. A second, later recompute catches the
 // settled size once the animation has actually finished.
+//
+// Resizing also has to re-fit the current layout's card size/positions
+// (fitLayoutToTable), push those changes onto any cards already drawn
+// (reflowTableCards), and rescale the draw pile (createDeck) — not just
+// reposition the pile — so nothing overlaps or sits at a stale, off-screen
+// spot after the viewport changes.
+function handleResponsiveResize() {
+    if (LAYOUT_BASE[currentLayout]) {
+        fitLayoutToTable(currentLayout);
+        positions = layouts[currentLayout];
+        reflowTableCards();
+    }
+    createDeck();
+    adjustDeckForLayout();
+}
+
 let resizeAdjustTimerQuick = null;
 let resizeAdjustTimerSettle = null;
 window.addEventListener("resize", () => {
     clearTimeout(resizeAdjustTimerQuick);
     clearTimeout(resizeAdjustTimerSettle);
-    resizeAdjustTimerQuick   = setTimeout(adjustDeckForLayout, 150);
-    resizeAdjustTimerSettle  = setTimeout(adjustDeckForLayout, 600);
+    resizeAdjustTimerQuick   = setTimeout(handleResponsiveResize, 150);
+    resizeAdjustTimerSettle  = setTimeout(handleResponsiveResize, 600);
 });
 
 // =============================================================================
@@ -701,6 +808,11 @@ function saveCustomLayout(selectedCells) {
         };
         drawOrders.custom.push(posNum);
     });
+
+    // Register this custom layout as its own responsive-fit baseline so
+    // later window resizes rescale it the same way the built-in layouts
+    // do, instead of leaving it stuck at today's viewport's px sizing.
+    LAYOUT_BASE.custom = JSON.parse(JSON.stringify(layouts.custom));
 
     setLayout('custom');
     document.getElementById('customLayoutOverlay').classList.remove('open');
@@ -1533,8 +1645,16 @@ function createDeck() {
     const existingChildren = Array.from(deckArea.children);
     const fragment = document.createDocumentFragment();
     const totalCards = currentDeck.length;
-    const maxWidth = Math.max(220, deckArea.offsetWidth - 220);
-    const spacing = Math.min(22, maxWidth / Math.max(1, totalCards));
+
+    // The pile's cards are sized in fixed px by their CSS (.deckCard /
+    // .deckCard.circular), designed around a ~1400px desktop viewport —
+    // scale them (and the fan's spacing) with the viewport so the pile
+    // isn't left tiny on a phone or stuck small on a huge monitor.
+    const uiScale   = getViewportUiScale();
+    const cardW     = Math.round(120 * uiScale);
+    const cardH     = Math.round(200 * uiScale);
+    const maxWidth  = Math.max(220, deckArea.offsetWidth - 220);
+    const spacing   = Math.min(22 * uiScale, maxWidth / Math.max(1, totalCards));
     const deckWidth = totalCards * spacing;
 
     currentDeck.forEach((card, index) => {
@@ -1548,6 +1668,8 @@ function createDeck() {
         const isCircular = deckConfigEntry.circular;
         cardBack.className = "deckCard" + (isCircular ? " circular" : "");
         cardBack.style.backgroundImage = `url('${deckConfigEntry.cover}')`;
+        cardBack.style.width  = cardW + "px";
+        cardBack.style.height = (isCircular ? cardW : cardH) + "px";
         cardBack.style.left = `calc(50% + ${index * spacing - deckWidth / 2}px)`;
         cardBack.style.zIndex = index;
         cardBack.dataset.cardId = card;
@@ -1602,6 +1724,7 @@ function drawCard(cardElement, cardId, deckName) {
     const cardNum = drawOrder[layoutIndex];
     const pos     = positions[cardNum];
     const size    = layouts[currentLayout].cardSize;
+    cardDiv.dataset.posNum  = cardNum;
     cardDiv.style.left      = pos.x;
     cardDiv.style.top       = pos.y;
     cardDiv.style.width     = size.width;
