@@ -164,9 +164,15 @@ const layouts = {
         4:  { x: '35%', y: '74%' },
         5:  { x: '15%', y: '40%' },
         6:  { x: '55%', y: '40%' },
+        // 7-10 form the right-hand column, meant to be evenly spaced —
+        // 8/9 sat at 59%/32%, a 27% gap on both sides of them but only 21%
+        // between 9 and 10, which read as uneven. Redistributed the same
+        // 75% total span (86% down to 11%) into three equal 25% gaps
+        // instead, without moving 7 or 10 (10's position is also load-
+        // bearing for the table's top-edge clearance — see above).
         7:  { x: '75%', y: '86%' },
-        8:  { x: '75%', y: '59%' },
-        9:  { x: '75%', y: '32%' },
+        8:  { x: '75%', y: '61%' },
+        9:  { x: '75%', y: '36%' },
         10: { x: '75%', y: '11%' },
 },
 
@@ -380,6 +386,45 @@ let drawOrder       = drawOrders.tarot;   // default draw order
 createDeck();
 adjustDeckForLayout();
 
+// A user-built custom layout can put its top row anywhere horizontally —
+// including under #toggleSettingsBar, which floats near the table's
+// top-right corner at a fixed spot the built-in layouts were hand-placed
+// to avoid. How much room is actually needed to clear it depends on the
+// resulting card height, which itself depends on the grid's density, so a
+// fixed % margin can't reliably solve this ahead of time — this runs
+// AFTER fitLayoutToTable() has settled on a real size, and nudges the
+// whole layout down by only as much as that specific card size needs.
+// Only ever touches layouts.custom.
+function clearSettingsButtonForCustomLayout() {
+    const table = document.getElementById("table");
+    if (!table || !layouts.custom || !layouts.custom.cardSize) return;
+
+    const tableH  = table.getBoundingClientRect().height || (window.innerHeight - 70);
+    const cardHPx = parseFloat(layouts.custom.cardSize.height) || 0;
+
+    // #toggleSettingsBar sits at viewport top:75px, 60px tall; #table
+    // starts at viewport top:70px — so in table-relative px that's roughly
+    // the [5, 65] band. SAFE_EDGE_PX is that bottom edge plus a small buffer.
+    const SAFE_EDGE_PX = 75;
+
+    let minYPct = Infinity;
+    Object.keys(layouts.custom).forEach(key => {
+        if (key === "cardSize") return;
+        const y = parseFloat(layouts.custom[key].y);
+        if (y < minYPct) minYPct = y;
+    });
+    if (!isFinite(minYPct)) return;
+
+    const topEdgePx = (minYPct / 100) * tableH - cardHPx / 2;
+    if (topEdgePx >= SAFE_EDGE_PX) return; // already clear
+
+    const shiftPct = ((SAFE_EDGE_PX - topEdgePx) / tableH) * 100;
+    Object.keys(layouts.custom).forEach(key => {
+        if (key === "cardSize") return;
+        layouts.custom[key].y = `${(parseFloat(layouts.custom[key].y) + shiftPct).toFixed(3)}%`;
+    });
+}
+
 // =============================================================================
 // LAYOUT SWITCHER
 // =============================================================================
@@ -394,6 +439,7 @@ function setLayout(name) {
         document.getElementById("toggleDeckBar")?.classList.add("collapsed");
     }
     fitLayoutToTable(name);
+    if (name === "custom") clearSettingsButtonForCustomLayout();
     currentLayout = name;
     positions   = layouts[name];
     drawOrder   = drawOrders[name];
@@ -476,6 +522,7 @@ function adjustDeckForLayout() {
 function handleResponsiveResize() {
     if (LAYOUT_BASE[currentLayout]) {
         fitLayoutToTable(currentLayout);
+        if (currentLayout === "custom") clearSettingsButtonForCustomLayout();
         positions = layouts[currentLayout];
         reflowTableCards();
     }
@@ -839,23 +886,39 @@ function saveCustomLayout(selectedCells) {
     const cardW = 200;
     const cardH = 300;
 
-    // MARGIN_PCT matches the ~25% edge margin the built-in "2x4" layout
-    // uses on both axes (its positions run 25%-76% horizontally and
-    // 25%-72% vertically). Columns/rows are spread evenly across that same
-    // 25%-75% band, however many are used, rather than stepping outward by
-    // a fixed per-card-size amount — the old step formula was derived
-    // assuming a ~1400px-wide table, so on a narrower one (iPad, phone) it
-    // could walk later columns/rows straight past the table's own edge.
+    // Columns/rows are spread evenly across a margin-to-(100-margin) band,
+    // however many are used, rather than stepping outward by a fixed
+    // per-card-size amount — the old step formula was derived assuming a
+    // ~1400px-wide table, so on a narrower one (iPad, phone) it could walk
+    // later columns/rows straight past the table's own edge.
     // fitLayoutToTable()'s edge-safety check then had to shrink the
     // *entire* layout down to almost nothing to pull that one point back
     // inside the table. Evenly spacing within a fixed band can never
     // overflow, regardless of table size or how many cells were picked —
     // the actual card size still comes from fitLayoutToTable() reading
     // these points' real pixel spacing once they're set.
-    const MARGIN_PCT = 25;
-    const spanPct  = 100 - 2 * MARGIN_PCT; // 50, matches the "2x4" layout's own span
-    const stepXPct = usedCols > 1 ? spanPct / (usedCols - 1) : 0;
-    const stepYPct = usedRows > 1 ? spanPct / (usedRows - 1) : 0;
+    //
+    // The margin itself is NOT the built-in "2x4" layout's fixed 25% on
+    // both axes — a single fixed margin can't serve every grid size well:
+    // a wide margin leaves plenty of room for a sparse 2-column layout but
+    // squeezes a dense 4-column one into a narrow band (undersized cards
+    // with a big unused gap between them, since the safe card size ends up
+    // set by clearing the table's edge rather than by the actual distance
+    // to the next card). Each axis's margin is instead picked per how many
+    // columns/rows THAT axis actually uses — not a guess, but the value
+    // (out of a fine sweep) where the tightest card-to-card pair and the
+    // table-edge clearance become equally tight, which is exactly the
+    // point where a card is as big as it can get without either wasting
+    // room or overlapping. Re-verified across every grid shape the picker
+    // allows (1x1 through 4x4) and every screen size after picking these.
+    const MARGIN_BY_COUNT = { 1: 25, 2: 25, 3: 17, 4: 12 };
+    const marginForCount = n => MARGIN_BY_COUNT[n] ?? 12;
+    const marginXPct = marginForCount(usedCols);
+    const marginYPct = marginForCount(usedRows);
+    const spanXPct = 100 - 2 * marginXPct;
+    const spanYPct = 100 - 2 * marginYPct;
+    const stepXPct = usedCols > 1 ? spanXPct / (usedCols - 1) : 0;
+    const stepYPct = usedRows > 1 ? spanYPct / (usedRows - 1) : 0;
 
     layouts.custom     = { cardSize: { width: `${cardW}px`, height: `${cardH}px` } };
     drawOrders.custom  = [];
@@ -864,10 +927,10 @@ function saveCustomLayout(selectedCells) {
         const posNum = i + 1;
         const xPct = usedCols === 1
             ? 50
-            : Math.round(MARGIN_PCT + (cell.c - minC) * stepXPct);
+            : Math.round(marginXPct + (cell.c - minC) * stepXPct);
         const yPct = usedRows === 1
             ? 50
-            : Math.round(MARGIN_PCT + (cell.r - minR) * stepYPct);
+            : Math.round(marginYPct + (cell.r - minR) * stepYPct);
 
         layouts.custom[posNum] = {
             x: `${xPct}%`,
