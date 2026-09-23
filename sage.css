@@ -1,9 +1,4 @@
 body {
-    background-image: url('img/background/background74.png');
-    background-size: cover;
-    background-position: center;
-    background-repeat: no-repeat;
-    background-attachment: fixed;
     color: white;
     font-family: serif;
     margin: 0;
@@ -12,15 +7,31 @@ body {
     min-height: 100vh;
 }
 
-/* background-attachment: fixed is unreliable on small/mobile viewports
-   (notably iOS Safari, where it can fail to repaint correctly) — fall
-   back to a normal scrolling background there. size/position/repeat stay
-   the same, so it still fills and crops the same way, just without the
-   parallax-style fixed attachment. */
-@media (max-width: 768px) {
-    body {
-        background-attachment: scroll;
-    }
+/* The page background lives on its own fixed, viewport-sized layer instead
+   of directly on body. Reasons:
+   1) `html` has no background of its own, so the UA paints body's
+      background across the whole scrollable page canvas — not just one
+      screenful. #table/#deck are absolutely positioned against the
+      viewport and can push the page taller than one screen depending on
+      which layout/deck is active, which made the background visibly
+      re-stretch/re-crop every time that height changed (switching
+      layouts, selecting a deck, resizing). A `position: fixed` layer is
+      always exactly 100vw x 100vh, completely decoupled from document
+      height, so this can't happen no matter what the rest of the page
+      does.
+   2) It also makes `background-attachment: fixed` (and its iOS Safari
+      repaint bug) unnecessary — a genuinely fixed-position element with a
+      plain `cover` background gives the same pinned-in-place look without
+      relying on that property at all. */
+#bgLayer {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image: url('img/background/background74.png');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
 }
 
 @font-face {

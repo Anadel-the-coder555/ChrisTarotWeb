@@ -82,16 +82,26 @@ const layouts = {
         // clear of it. 13% gives it the same kind of headroom the other
         // points already have, so the layout's real bottleneck goes back
         // to point spacing instead of edge clearance.
+        //
+        // The remaining bottleneck was the top triangle (1/3/4) and the
+        // outer wing points (7/9) sitting too close to their neighbors —
+        // 3/4 widened further from 1, and 7/9 pulled further out from 6/8
+        // — plus the spine's tightest gap (1-2) loosened a little by
+        // nudging 2 and 10 down, redistributing the spine's gaps more
+        // evenly instead of shrinking the whole layout to fit its
+        // shortest one. Numerically tuned against fitLayoutToTable()'s own
+        // overlap math (see conversation) rather than eyeballed — pushing
+        // any of these further starts hitting the table's edges instead.
         1:  { x: '45%', y: '13%' },
-        2:  { x: '45%', y: '34%' },
-        3:  { x: '55%', y: '15%' },
-        4:  { x: '35%', y: '15%' },
+        2:  { x: '45%', y: '37%' },
+        3:  { x: '61%', y: '15%' },
+        4:  { x: '29%', y: '15%' },
         5:  { x: '45%', y: '86%' },
         6:  { x: '25%', y: '40%' },
-        7:  { x: '15%', y: '30%' },
+        7:  { x: '9%',  y: '30%' },
         8:  { x: '65%', y: '40%' },
-        9:  { x: '75%', y: '30%' },
-        10: { x: '45%', y: '60%' },
+        9:  { x: '81%', y: '30%' },
+        10: { x: '45%', y: '62%' },
     },
     circle: {
         cardSize: { width: '160px', height: '245px' },
@@ -144,17 +154,20 @@ const layouts = {
         // fraction of its real size on every screen, not just small ones.
         // Nudged both down a few % (10 gets slightly more since it started
         // closer) so the layout's actual point-spacing becomes the limit
-        // again instead of the top edge.
+        // again instead of the top edge. Still edge-adjacent on an iPad, so
+        // pushed one more % each — past this point the 9-10 pair distance
+        // and the edge margin are about equally tight, so there's little
+        // left to gain without widening that pair too.
         1:  { x: '35%', y: '40%' },
         2:  { x: '35%', y: '40%', rotate: 90 },
-        3:  { x: '35%', y: '11%' },
+        3:  { x: '35%', y: '12%' },
         4:  { x: '35%', y: '74%' },
         5:  { x: '15%', y: '40%' },
         6:  { x: '55%', y: '40%' },
         7:  { x: '75%', y: '86%' },
         8:  { x: '75%', y: '59%' },
         9:  { x: '75%', y: '32%' },
-        10: { x: '75%', y: '10%' },
+        10: { x: '75%', y: '11%' },
 },
 
 };
@@ -221,7 +234,7 @@ const LAYOUT_GUTTER = {
     dragon: 0.97,
     celtic: 0.97,
     vformation: 0.97,
-    custom: 0.9,
+    custom: 0.97,
 };
 const DEFAULT_LAYOUT_GUTTER = 0.85;
 
@@ -732,7 +745,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     confirmBtn.addEventListener("click", () => {
         if (pendingBg) {
-            document.body.style.backgroundImage = `url('${pendingBg}')`;
+            document.getElementById("bgLayer").style.backgroundImage = `url('${pendingBg}')`;
             const selectedThumb = document.querySelector(".bgThumb.selected");  // ← ADD THIS LINE
             const theme = selectedThumb ? selectedThumb.dataset.theme : "dark";
             document.body.classList.remove("theme-dark", "theme-light");
@@ -750,7 +763,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const file = event.target.files[0];
         if (!file) return;
         const reader = new FileReader();
-        reader.onload = (e) => { document.body.style.backgroundImage = `url('${e.target.result}')`; };
+        reader.onload = (e) => { document.getElementById("bgLayer").style.backgroundImage = `url('${e.target.result}')`; };
         reader.readAsDataURL(file);
     });
 
